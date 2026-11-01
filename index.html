@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WS Staff Hub</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#21A348">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+:root{
+  --g:#21A348; --g-dark:#187a37; --g-soft:#e8f6ed;
+  --bg:#f3f5f4; --panel:#fff; --line:#e3e8e5; --text:#1d2723; --muted:#6b7a73;
+  --danger:#c0392b; --warn:#d98e04;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text);background:var(--bg);font-size:15px;-webkit-text-size-adjust:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--g-dark)}
+#app{height:100vh;height:100dvh;display:flex;overflow:hidden}
+
+/* ---------- login ---------- */
+.login{margin:auto;width:min(380px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 24px;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+.login img{width:64px;height:64px;border-radius:14px;display:block;margin:0 auto 10px}
+.login h1{font-size:20px;text-align:center;margin:0}
+.login p.tag{text-align:center;color:var(--muted);margin:4px 0 18px;font-size:13px}
+.login label{display:block;font-size:13px;color:var(--muted);margin:12px 0 4px}
+.login input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:16px}
+.login input:focus,.composer textarea:focus,.modal input:focus,.modal select:focus,.modal textarea:focus{outline:2px solid var(--g);outline-offset:-1px}
+.btn{background:var(--g);color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600}
+.btn:hover{background:var(--g-dark)}
+.btn.ghost{background:transparent;color:var(--g-dark);border:1px solid var(--line)}
+.btn.ghost:hover{background:var(--g-soft)}
+.btn.full{width:100%;margin-top:18px}
+.err{color:var(--danger);font-size:13px;margin-top:10px;min-height:18px}
+.linkbtn{background:none;border:0;color:var(--g-dark);padding:0;font-size:13px}
+
+/* ---------- layout ---------- */
+.sidebar{width:300px;flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);min-height:0}
+.sb-head{display:flex;gap:10px;align-items:center;padding:14px 14px 12px;background:var(--g);color:#fff;padding-top:calc(14px + env(safe-area-inset-top))}
+.sb-head img{width:36px;height:36px;border-radius:9px;background:#fff}
+.sb-head b{display:block;font-size:16px}
+.sb-head small{opacity:.9;font-size:11.5px}
+.sb-scroll{flex:1;overflow-y:auto;padding:6px 8px}
+.sec{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:14px 8px 4px}
+.plus{border:0;background:var(--g-soft);color:var(--g-dark);width:24px;height:24px;border-radius:7px;font-weight:700;line-height:1}
+.row{width:100%;display:flex;align-items:center;gap:8px;text-align:left;background:none;border:0;padding:9px 10px;border-radius:9px;min-height:40px}
+.row:hover{background:var(--bg)}
+.row.active{background:var(--g-soft);color:var(--g-dark);font-weight:600}
+.row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.unread .name{font-weight:700}
+.badge{background:var(--g);color:#fff;border-radius:999px;font-size:11.5px;font-weight:700;padding:1px 7px;min-width:20px;text-align:center}
+.badge.gray{background:#9aa7a0}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--g);flex:none}
+.sb-foot{border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:6px;font-size:13px}
+.sb-foot .me{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.sb-foot .me button{background:none;border:0;padding:0;text-align:left;font-weight:600}
+
+.m-head{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line);padding-top:calc(12px + env(safe-area-inset-top))}
+.m-head h2{margin:0;font-size:17px}
+.m-head small{color:var(--muted)}
+.m-head .grow{flex:1;min-width:0}
+.m-head .grow h2,.m-head .grow small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.back{display:none;background:none;border:0;font-size:22px;padding:0 6px 0 0;color:var(--g-dark)}
+
+/* ---------- messages ---------- */
+.msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:3px;min-height:0}
+.empty{margin:auto;color:var(--muted);text-align:center;padding:30px}
+.day{align-self:center;font-size:12px;color:var(--muted);background:#e8ece9;border-radius:999px;padding:3px 12px;margin:12px 0 6px}
+.sys{align-self:center;font-size:12.5px;color:var(--muted);background:var(--g-soft);border-radius:10px;padding:5px 12px;margin:4px 0;max-width:90%;text-align:center}
+.msg{display:flex;flex-direction:column;max-width:78%;align-self:flex-start}
+.msg.mine{align-self:flex-end;align-items:flex-end}
+.msg.first{margin-top:8px}
+.who{font-size:12px;color:var(--muted);margin:0 6px 2px}
+.bubble{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 12px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;line-height:1.38}
+.msg.mine .bubble{background:var(--g);border-color:var(--g);color:#fff}
+.msg.mine .bubble a{color:#fff}
+.bubble .t{font-size:10.5px;opacity:.6;margin-left:10px;white-space:nowrap;float:right;margin-top:5px}
+.composer{display:flex;gap:8px;align-items:flex-end;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+.composer textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:16px;max-height:140px;min-height:44px}
+.composer .btn{height:44px}
+
+/* ---------- tickets ---------- */
+.t-body{flex:1;overflow-y:auto;padding:14px 16px;min-height:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 13px;font-size:13px}
+.chip.on{background:var(--g);color:#fff;border-color:var(--g)}
+.tcard{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.tcard:hover{border-color:var(--g)}
+.tcard .top{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.tcard .code{font-size:12px;color:var(--muted);font-weight:700}
+.tcard h3{margin:4px 0 6px;font-size:15.5px}
+.meta{font-size:12.5px;color:var(--muted);display:flex;gap:6px 12px;flex-wrap:wrap}
+.pill{font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 9px;background:#e8ece9;color:#445}
+.pill.s-open{background:#e3f0ff;color:#1b5fb0}.pill.s-in_progress{background:#fff1d6;color:#9a6200}
+.pill.s-waiting{background:#efe5ff;color:#6a3fb0}.pill.s-resolved,.pill.s-closed{background:var(--g-soft);color:var(--g-dark)}
+.pill.p-high{background:#ffe5d6;color:#b24a00}.pill.p-urgent{background:#fde0dd;color:var(--danger)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.panel h3{margin:0 0 6px}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.fields label,.modal label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:3px}
+.fields select,.modal input,.modal select,.modal textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:16px}
+.desc{white-space:pre-wrap;line-height:1.45}
+
+/* ---------- modal / toast ---------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal{background:#fff;border-radius:14px;width:min(480px,100%);max-height:90vh;overflow:auto}
+.mh{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}
+.mh .x{background:none;border:0;font-size:18px}
+.mb{padding:14px 16px 16px}
+.mb .f{margin-bottom:12px}
+.pick{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;width:100%;background:#fff;text-align:left}
+.pick:hover{border-color:var(--g)}
+.pick input{width:auto}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:60;font-size:14px;max-width:90vw}
+
+/* ---------- phones ---------- */
+@media (max-width:760px){
+  .sidebar{width:100%;border-right:0}
+  .main{display:none}
+  #app.show-main .sidebar{display:none}
+  #app.show-main .main{display:flex}
+  .back{display:block}
+  .msg{max-width:88%}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="config.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updateProfile }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, setDoc, addDoc,
+  updateDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+/* =====================================================================
+   Setup check
+   ===================================================================== */
+const appEl = document.getElementById("app");
+const cfg = window.FIREBASE_CONFIG;
+if (!cfg || !cfg.apiKey || String(cfg.apiKey).startsWith("PASTE")) {
+  appEl.innerHTML = `<div class="login"><h1>Almost there</h1><p class="tag">Open <b>config.js</b> and paste in your Firebase web app settings (see SETUP.md, step 4).</p></div>`;
+  throw new Error("Firebase config missing");
+}
+
+const app = initializeApp(cfg);
+const auth = getAuth(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) // keeps working in weak field signal
+});
+
+/* =====================================================================
+   Constants & state
+   ===================================================================== */
+const DEFAULT_CATS = ["IT / Tech Support", "Equipment & Maintenance", "Field Issue", "Procedure Question", "Schedule / Payroll", "Other"];
+const CHANNELS = [
+  { id: "general",    name: "general",     desc: "Company-wide chat" },
+  { id: "field",      name: "field",       desc: "Crew and job-site updates" },
+  { id: "it-help",    name: "it-help",     desc: "Devices, logins and software" },
+  { id: "procedures", name: "procedures",  desc: "How do we do this?" },
+  { id: "tickets",    name: "ticket-feed", desc: "Automatic ticket updates" },
+];
+const STATUSES = { open: "Open", in_progress: "In progress", waiting: "Waiting", resolved: "Resolved", closed: "Closed" };
+const PRIORITIES = { low: "Low", normal: "Normal", high: "High", urgent: "Urgent" };
+
+const S = {
+  me: null, users: {}, convs: {}, tickets: [], cats: DEFAULT_CATS,
+  view: null, activeConv: null, activeTicket: null, ticketFilter: "open",
+  msgs: [], unsub: [], msgUnsub: null, cmtUnsub: null,
+  seen: {}, seeded: false, lastMark: 0
+};
+
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const linkify = t => esc(t).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+const ms = v => (v && v.toMillis) ? v.toMillis() : (v ? +v : 0);
+const fmtTime = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const fmtDay = d => {
+  const t = new Date(), y = new Date(Date.now() - 864e5);
+  if (d.toDateString() === t.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+};
+const ago = t => {
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (m < 1) return "just now"; if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60); if (h < 24) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
+};
+const uid = () => S.me.uid;
+const myName = () => S.users[uid()]?.name || S.me.displayName || (S.me.email || "Staff").split("@")[0];
+const isAdmin = () => S.users[uid()]?.role === "admin";
+const userName = id => S.users[id]?.name || "Someone";
+const data = d => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) });
+const coarse = () => window.matchMedia("(pointer:coarse)").matches;
+
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3500);
+}
+function modal(title, body, onMount) {
+  document.querySelector(".overlay")?.remove();
+  const o = document.createElement("div"); o.className = "overlay";
+  o.innerHTML = `<div class="modal"><div class="mh"><b>${esc(title)}</b><button class="x" aria-label="Close">✕</button></div><div class="mb">${body}</div></div>`;
+  o.addEventListener("click", e => { if (e.target === o || e.target.closest(".x")) o.remove(); });
+  document.body.appendChild(o);
+  onMount && onMount(o, () => o.remove());
+}
+
+/* ---------- sound + notifications ---------- */
+let actx;
+function beep() {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.05; o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + 0.12);
+  } catch {}
+}
+async function showNote(title, body, tag) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) return reg.showNotification(title, { body, icon: "icon-192.png", tag });
+  } catch {}
+  try { new Notification(title, { body, icon: "icon-192.png", tag }); } catch {}
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+/* =====================================================================
+   Auth
+   ===================================================================== */
+onAuthStateChanged(auth, async u => {
+  teardown();
+  if (!u) { S.me = null; renderLogin(); return; }
+  S.me = u;
+  try { await ensureProfile(u); startApp(); }
+  catch (e) { renderFatal(e); }
+});
+
+async function ensureProfile(u) {
+  const ref = doc(db, "users", u.uid);
+  const s = await getDoc(ref);
+  if (!s.exists()) {
+    await setDoc(ref, {
+      name: u.displayName || (u.email || "Staff").split("@")[0],
+      email: u.email || "", role: "staff", createdAt: serverTimestamp()
+    });
+  }
+}
+
+function teardown() {
+  S.unsub.forEach(f => f()); S.unsub = [];
+  S.msgUnsub && S.msgUnsub(); S.cmtUnsub && S.cmtUnsub();
+  S.msgUnsub = S.cmtUnsub = null;
+  Object.assign(S, { users: {}, convs: {}, tickets: [], view: null, activeConv: null, activeTicket: null, seen: {}, seeded: false });
+}
+
+function renderFatal(e) {
+  console.error(e);
+  const perm = /permission/i.test(e.message || "");
+  appEl.innerHTML = `<div class="login"><h1>Couldn't load</h1><p class="tag">${perm
+    ? "Firestore is blocking access. Publish the rules from <b>firestore.rules</b> (SETUP.md, step 3)."
+    : esc(e.message || "Unknown error")}</p><button class="btn full" id="so">Sign out</button></div>`;
+  $("#so").onclick = () => signOut(auth);
+}
+
+function renderLogin() {
+  appEl.className = "";
+  appEl.innerHTML = `
+  <form class="login" id="lf">
+    <img src="icon-192.png" alt="">
+    <h1>WS Staff Hub</h1>
+    <p class="tag">WS Lawn Care Services, LLC</p>
+    <label for="em">Email</label><input id="em" type="email" autocomplete="username" required>
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password" required>
+    <button class="btn full" type="submit">Sign in</button>
+    <div class="err" id="er"></div>
+    <div style="text-align:center"><button type="button" class="linkbtn" id="fp">Forgot password?</button></div>
+  </form>`;
+  const er = $("#er");
+  $("#lf").onsubmit = async e => {
+    e.preventDefault(); er.textContent = "";
+    try { await signInWithEmailAndPassword(auth, $("#em").value.trim(), $("#pw").value); }
+    catch (x) {
+      er.textContent = /invalid|wrong|credential|not-found/i.test(x.code + x.message)
+        ? "Email or password is incorrect." : "Couldn't sign in: " + (x.code || x.message);
+    }
+  };
+  $("#fp").onclick = async () => {
+    const em = $("#em").value.trim();
+    if (!em) { er.textContent = "Type your email above first."; return; }
+    try { await sendPasswordResetEmail(auth, em); er.style.color = "var(--g-dark)"; er.textContent = "Password reset email sent."; }
+    catch { er.style.color = "var(--danger)"; er.textContent = "Couldn't send reset email."; }
+  };
+}
+
+/* =====================================================================
+   App start: listeners
+   ===================================================================== */
+function startApp() {
+  renderShell();
+  const me = uid();
+
+  S.unsub.push(onSnapshot(collection(db, "users"), snap => {
+    S.users = {}; snap.forEach(d => S.users[d.id] = { id: d.id, ...d.data() });
+    if (!S.seeded && isAdmin()) { S.seeded = true; seedDefaults(); }
+    renderSidebar(); refreshHeader();
+  }, console.error));
+
+  const ready = [false, false];
+  [query(collection(db, "conversations"), where("members", "array-contains", me)),
+   query(collection(db, "conversations"), where("everyone", "==", true))].forEach((q, i) => {
+    S.unsub.push(onSnapshot(q, snap => {
+      snap.docChanges().forEach(ch => {
+        if (ch.type === "removed") { delete S.convs[ch.doc.id]; return; }
+        const c = data(ch.doc); S.convs[c.id] = c;
+        maybeNotify(c, ready[i]);
+        if (S.activeConv === c.id) markRead(c.id);
+      });
+      ready[i] = true;
+      renderSidebar(); updateTitle(); refreshHeader();
+    }, console.error));
+  });
+
+  S.unsub.push(onSnapshot(doc(db, "config", "categories"), s => {
+    S.cats = (s.exists() && Array.isArray(s.data().list) && s.data().list.length) ? s.data().list : DEFAULT_CATS;
+  }, () => {}));
+
+  S.unsub.push(onSnapshot(query(collection(db, "tickets"), orderBy("createdAt", "desc"), limit(200)), snap => {
+    S.tickets = snap.docs.map(data);
+    renderSidebar();
+    if (S.view === "tickets") renderTicketList();
+    if (S.view === "ticket") renderTicketHead();
+  }, console.error));
+}
+
+async function seedDefaults() {
+  try {
+    for (const ch of CHANNELS) {
+      const ref = doc(db, "conversations", ch.id);
+      if (!(await getDoc(ref)).exists()) {
+        await setDoc(ref, { type: "channel", name: ch.name, desc: ch.desc, everyone: true, members: [],
+          createdBy: uid(), createdAt: serverTimestamp(), lastMessageAt: serverTimestamp() });
+      }
+    }
+    const cref = doc(db, "config", "categories");
+    if (!(await getDoc(cref)).exists()) await setDoc(cref, { list: DEFAULT_CATS });
+  } catch (e) { console.error("seed failed", e); }
+}
+
+function maybeNotify(c, isReady) {
+  const t = ms(c.lastMessageAt), prev = S.seen[c.id];
+  S.seen[c.id] = Math.max(t, prev || 0);
+  if (!isReady || prev === undefined) return;
+  if (t > prev && c.lastMessageBy && c.lastMessageBy !== uid()) {
+    const viewing = !document.hidden && S.activeConv === c.id;
+    if (!viewing) { beep(); showNote(convTitle(c), c.lastMessageText || "New message", c.id); }
+  }
+}
+
+/* =====================================================================
+   Sidebar
+   ===================================================================== */
+function renderShell() {
+  appEl.className = "";
+  appEl.innerHTML = `<aside class="sidebar" id="sb"></aside><section class="main" id="main"></section>`;
+  $("#sb").addEventListener("click", e => {
+    const conv = e.target.closest("[data-conv]"), nav = e.target.closest("[data-nav]");
+    if (conv) openChat(conv.dataset.conv);
+    else if (nav) openTickets();
+    else if (e.target.closest("#newDm")) newDmModal();
+    else if (e.target.closest("#newGroup")) newGroupModal();
+    else if (e.target.closest("#myName")) editName();
+    else if (e.target.closest("#notif")) enableNotifications();
+    else if (e.target.closest("#signout")) signOut(auth);
+  });
+  renderEmptyMain();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && S.activeConv) markRead(S.activeConv); updateTitle(); renderSidebar(); });
+}
+
+function renderEmptyMain() {
+  $("#main").innerHTML = `<div class="empty">Pick a channel, a teammate or a ticket on the left.</div>`;
+}
+
+function convTitle(c) {
+  if (c.type === "dm") return userName(c.members.find(m => m !== uid()));
+  return c.type === "channel" ? "# " + c.name : c.name;
+}
+const unreadRaw = c => c.lastMessageBy && c.lastMessageBy !== uid() && ms(c.lastMessageAt) > ms(c.lastRead?.[uid()]);
+const isUnread = c => unreadRaw(c) && !(S.activeConv === c.id && !document.hidden);
+const openTicketCount = () => S.tickets.filter(t => t.status !== "closed" && t.status !== "resolved").length;
+
+function updateTitle() {
+  const n = Object.values(S.convs).filter(isUnread).length;
+  document.title = (n ? `(${n}) ` : "") + "WS Staff Hub";
+}
+
+function renderSidebar() {
+  const sb = $("#sb"); if (!sb || !S.me) return;
+  const all = Object.values(S.convs);
+  const row = c => `<button class="row ${S.activeConv === c.id ? "active" : ""} ${isUnread(c) ? "unread" : ""}" data-conv="${c.id}">
+      <span class="name">${esc(convTitle(c))}</span>${isUnread(c) ? '<span class="dot"></span>' : ""}</button>`;
+  const order = id => { const i = CHANNELS.findIndex(c => c.id === id); return i < 0 ? 99 : i; };
+  const byRecent = (a, b) => ms(b.lastMessageAt) - ms(a.lastMessageAt);
+  const channels = all.filter(c => c.type === "channel").sort((a, b) => order(a.id) - order(b.id));
+  const groups = all.filter(c => c.type === "group").sort(byRecent);
+  const dms = all.filter(c => c.type === "dm").sort(byRecent);
+  const open = openTicketCount();
+
+  sb.innerHTML = `
+  <div class="sb-head"><img src="icon-192.png" alt=""><div><b>WS Staff Hub</b><small>You Grow It, We Mow It!®</small></div></div>
+  <div class="sb-scroll">
+    <div class="sec" style="padding-top:10px">Support</div>
+    <button class="row ${S.view === "tickets" || S.view === "ticket" ? "active" : ""}" data-nav="tickets">
+      <span class="name">🎫 Support tickets</span>${open ? `<span class="badge gray">${open} open</span>` : ""}</button>
+    <div class="sec">Channels</div>${channels.map(row).join("") || '<div class="meta" style="padding:6px 10px">Waiting for an admin to set up channels…</div>'}
+    <div class="sec">Groups <button class="plus" id="newGroup" title="New group">＋</button></div>${groups.map(row).join("")}
+    <div class="sec">Direct messages <button class="plus" id="newDm" title="New message">＋</button></div>${dms.map(row).join("")}
+  </div>
+  <div class="sb-foot">
+    <div class="me"><button id="myName" title="Edit my name">👤 ${esc(myName())}${isAdmin() ? " (admin)" : ""}</button>
+      <button id="signout" class="linkbtn">Sign out</button></div>
+    ${("Notification" in window && Notification.permission === "default") ? '<button id="notif" class="linkbtn" style="text-align:left">🔔 Turn on notifications</button>' : ""}
+  </div>`;
+}
+
+async function enableNotifications() {
+  try { const r = await Notification.requestPermission(); toast(r === "granted" ? "Notifications on" : "Notifications blocked"); }
+  catch { toast("Notifications aren't supported here"); }
+  renderSidebar();
+}
+
+async function editName() {
+  const n = prompt("Display name", myName());
+  if (!n || !n.trim()) return;
+  try { await updateDoc(doc(db, "users", uid()), { name: n.trim() }); await updateProfile(S.me, { displayName: n.trim() }); }
+  catch { toast("Couldn't save name"); }
+}
+
+/* ---------- new DM / group ---------- */
+function newDmModal() {
+  const others = Object.values(S.users).filter(u => u.id !== uid());
+  modal("New message", others.length
+    ? others.map(u => `<button class="pick" data-u="${u.id}"><b>${esc(u.name)}</b></button>`).join("")
+    : "<p>No other teammates have signed in yet.</p>", (o, close) => {
+    o.addEventListener("click", async e => {
+      const b = e.target.closest("[data-u]"); if (!b) return;
+      const other = b.dataset.u, id = "dm_" + [uid(), other].sort().join("_"), ref = doc(db, "conversations", id);
+      try {
+        if (!(await getDoc(ref)).exists())
+          await setDoc(ref, { type: "dm", everyone: false, members: [uid(), other], createdBy: uid(), createdAt: serverTimestamp(), lastMessageAt: serverTimestamp() });
+        close(); S.convs[id] = S.convs[id] || { id, type: "dm", members: [uid(), other], everyone: false };
+        openChat(id);
+      } catch (x) { console.error(x); toast("Couldn't start chat"); }
+    });
+  });
+}
+
+function newGroupModal() {
+  const others = Object.values(S.users).filter(u => u.id !== uid());
+  modal("New group chat", `
+    <div class="f"><label>Group name</label><input id="gn" placeholder="e.g. Crew A, Office"></div>
+    <label>Members</label>
+    ${others.map(u => `<label class="pick"><input type="checkbox" value="${u.id}" checked> <b>${esc(u.name)}</b></label>`).join("") || "<p>No other teammates yet.</p>"}
+    <button class="btn full" id="gc">Create group</button>`, (o, close) => {
+    $("#gc", o).onclick = async () => {
+      const name = $("#gn", o).value.trim(); if (!name) return toast("Give the group a name");
+      const picked = [...o.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
+      try {
+        const ref = await addDoc(collection(db, "conversations"), { type: "group", name, everyone: false, members: [uid(), ...picked],
+          createdBy: uid(), createdAt: serverTimestamp(), lastMessageAt: serverTimestamp() });
+        close(); S.convs[ref.id] = { id: ref.id, type: "group", name, members: [uid(), ...picked], everyone: false };
+        openChat(ref.id);
+      } catch (x) { console.error(x); toast("Couldn't create group"); }
+    };
+  });
+}
+
+/* =====================================================================
+   Chat view
+   ===================================================================== */
+function closeSubs() {
+  S.msgUnsub && S.msgUnsub(); S.cmtUnsub && S.cmtUnsub(); S.msgUnsub = S.cmtUnsub = null;
+}
+
+function openChat(id) {
+  closeSubs();
+  S.view = "chat"; S.activeConv = id; S.activeTicket = null; S.msgs = [];
+  appEl.classList.add("show-main");
+  $("#main").innerHTML = `
+    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div></header>
+    <div class="msgs" id="msgs"></div>
+    <form class="composer" id="composer"><textarea id="txt" rows="1" placeholder="Message…" enterkeyhint="send"></textarea><button class="btn" type="submit">Send</button></form>`;
+  refreshHeader();
+  $("#back").onclick = goHome;
+  const txt = $("#txt");
+  txt.addEventListener("input", () => { txt.style.height = "auto"; txt.style.height = Math.min(txt.scrollHeight, 140) + "px"; });
+  txt.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !coarse()) { e.preventDefault(); $("#composer").requestSubmit(); } });
+  $("#composer").onsubmit = e => { e.preventDefault(); const v = txt.value; txt.value = ""; txt.style.height = "auto"; sendMsg(v); };
+  if (!coarse()) txt.focus();
+
+  S.msgUnsub = onSnapshot(query(collection(db, "conversations", id, "messages"), orderBy("createdAt", "desc"), limit(300)), snap => {
+    S.msgs = snap.docs.map(data).reverse(); renderMessages(); markRead(id);
+  }, e => { console.error(e); toast("Couldn't load messages"); });
+  renderSidebar();
+}
+
+function goHome() { appEl.classList.remove("show-main"); closeSubs(); S.view = null; S.activeConv = null; S.activeTicket = null; renderSidebar(); renderEmptyMain(); }
+
+function refreshHeader() {
+  if (S.view !== "chat") return;
+  const c = S.convs[S.activeConv], t = $("#ch-t"), s = $("#ch-s"); if (!c || !t) return;
+  t.textContent = convTitle(c);
+  s.textContent = c.type === "channel" ? (c.desc || "Everyone") :
+    c.type === "group" ? c.members.map(userName).join(", ") : "Direct message";
+}
+
+function renderMessages() {
+  const el = $("#msgs"); if (!el) return;
+  const stick = !el.dataset.init || el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+  let html = "", lastDay = "", lastUid = null;
+  if (!S.msgs.length) html = `<div class="empty">No messages yet — say hello 👋</div>`;
+  for (const m of S.msgs) {
+    const d = new Date(ms(m.createdAt) || Date.now()), day = d.toDateString();
+    if (day !== lastDay) { html += `<div class="day">${fmtDay(d)}</div>`; lastDay = day; lastUid = null; }
+    if (m.system) { html += `<div class="sys">${linkify(m.text)}</div>`; lastUid = null; continue; }
+    const mine = m.uid === uid(), first = m.uid !== lastUid; lastUid = m.uid;
+    html += `<div class="msg ${mine ? "mine" : ""} ${first ? "first" : ""}">${first && !mine ? `<div class="who">${esc(S.users[m.uid]?.name || m.name)}</div>` : ""}
+      <div class="bubble">${linkify(m.text)}<span class="t">${fmtTime(d)}</span></div></div>`;
+  }
+  el.innerHTML = html; el.dataset.init = "1";
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+function markRead(id) {
+  const c = S.convs[id];
+  if (!c || document.hidden || !unreadRaw(c)) return;
+  if (Date.now() - S.lastMark < 800) { setTimeout(() => markRead(id), 900); return; }
+  S.lastMark = Date.now();
+  updateDoc(doc(db, "conversations", id), { ["lastRead." + uid()]: serverTimestamp() }).catch(() => {});
+}
+
+function postTo(convId, text, system) {
+  const b = writeBatch(db);
+  b.set(doc(collection(db, "conversations", convId, "messages")), { uid: uid(), name: myName(), text, system: !!system, createdAt: serverTimestamp() });
+  b.update(doc(db, "conversations", convId), {
+    lastMessageAt: serverTimestamp(), lastMessageBy: uid(), lastMessageText: text.slice(0, 120), ["lastRead." + uid()]: serverTimestamp()
+  });
+  return b.commit();
+}
+
+function sendMsg(text) {
+  text = (text || "").trim(); if (!text || !S.activeConv) return;
+  postTo(S.activeConv, text, false).catch(e => { console.error(e); toast("Message not sent"); });
+}
+
+/* =====================================================================
+   Tickets
+   ===================================================================== */
+function openTickets() {
+  closeSubs(); S.view = "tickets"; S.activeConv = null; S.activeTicket = null;
+  appEl.classList.add("show-main");
+  $("#main").innerHTML = `
+    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2>Support tickets</h2><small>IT, field, procedures and more</small></div>
+      ${isAdmin() ? '<button class="btn ghost" id="cats">Categories</button>' : ""}<button class="btn" id="newT">＋ New</button></header>
+    <div class="t-body" id="tb"></div>`;
+  $("#back").onclick = goHome;
+  $("#newT").onclick = newTicketModal;
+  if ($("#cats")) $("#cats").onclick = categoriesModal;
+  renderTicketList(); renderSidebar();
+}
+
+function renderTicketList() {
+  const tb = $("#tb"); if (!tb || S.view !== "tickets") return;
+  const isOpen = t => t.status !== "closed" && t.status !== "resolved";
+  const f = S.ticketFilter;
+  const list = S.tickets.filter(t => f === "open" ? isOpen(t) : f === "mine" ? isOpen(t) && t.assignedTo === uid() : f === "done" ? !isOpen(t) : true);
+  const chip = (k, l) => `<button class="chip ${f === k ? "on" : ""}" data-f="${k}">${l}</button>`;
+  tb.innerHTML = `<div class="chips">${chip("open", "Open")}${chip("mine", "Assigned to me")}${chip("done", "Resolved / closed")}${chip("all", "All")}</div>` +
+    (list.map(t => `<button class="tcard" data-t="${t.id}">
+      <div class="top"><span class="code">${esc(t.code)} · ${esc(t.category)}</span><span><span class="pill p-${t.priority}">${PRIORITIES[t.priority] || t.priority}</span> <span class="pill s-${t.status}">${STATUSES[t.status] || t.status}</span></span></div>
+      <h3>${esc(t.title)}</h3>
+      <div class="meta"><span>From ${esc(t.createdByName)}</span><span>${t.assignedTo ? "Assigned to " + esc(userName(t.assignedTo)) : "Unassigned"}</span><span>${ago(ms(t.createdAt))}</span></div>
+    </button>`).join("") || `<div class="empty">No tickets here. 🎉</div>`);
+  tb.onclick = e => {
+    const c = e.target.closest("[data-f]"), t = e.target.closest("[data-t]");
+    if (c) { S.ticketFilter = c.dataset.f; renderTicketList(); }
+    else if (t) openTicket(t.dataset.t);
+  };
+}
+
+function newTicketModal() {
+  const opts = a => a.map(x => `<option>${esc(x)}</option>`).join("");
+  const people = Object.values(S.users).map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join("");
+  modal("New support ticket", `
+    <div class="f"><label>What's going on? (short title)</label><input id="nt" maxlength="120"></div>
+    <div class="f"><label>Category</label><select id="nc">${opts(S.cats)}</select></div>
+    <div class="f"><label>Priority</label><select id="np">${Object.entries(PRIORITIES).map(([k, v]) => `<option value="${k}" ${k === "normal" ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+    <div class="f"><label>Details</label><textarea id="nd" rows="5" placeholder="What happened? Where? What have you tried?"></textarea></div>
+    <div class="f"><label>Assign to (optional)</label><select id="na"><option value="">Unassigned</option>${people}</select></div>
+    <button class="btn full" id="ns">Submit ticket</button>`, (o, close) => {
+    $("#ns", o).onclick = async () => {
+      const title = $("#nt", o).value.trim(); if (!title) return toast("Add a short title");
+      $("#ns", o).disabled = true;
+      try {
+        const n = await runTransaction(db, async tx => {
+          const r = doc(db, "counters", "tickets"), s = await tx.get(r), v = (s.exists() ? s.data().n : 0) + 1;
+          tx.set(r, { n: v }); return v;
+        });
+        const code = "WS-" + String(n).padStart(4, "0"), category = $("#nc", o).value, priority = $("#np", o).value;
+        const ref = await addDoc(collection(db, "tickets"), {
+          number: n, code, title, category, priority, status: "open", description: $("#nd", o).value.trim(),
+          createdBy: uid(), createdByName: myName(), assignedTo: $("#na", o).value, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        });
+        postTo("tickets", `🎫 ${code} opened by ${myName()}: ${title} (${category} · ${PRIORITIES[priority]})`, true).catch(() => {});
+        close(); openTicket(ref.id);
+      } catch (x) { console.error(x); toast("Couldn't create ticket (are you online?)"); $("#ns", o).disabled = false; }
+    };
+  });
+}
+
+function categoriesModal() {
+  modal("Ticket categories", `<div class="f"><label>One category per line</label><textarea id="cl" rows="9">${esc(S.cats.join("\n"))}</textarea></div>
+    <button class="btn full" id="cs">Save categories</button>`, (o, close) => {
+    $("#cs", o).onclick = async () => {
+      const list = $("#cl", o).value.split("\n").map(s => s.trim()).filter(Boolean);
+      if (!list.length) return toast("Add at least one category");
+      try { await setDoc(doc(db, "config", "categories"), { list }); close(); toast("Categories saved"); }
+      catch { toast("Couldn't save"); }
+    };
+  });
+}
+
+function openTicket(id) {
+  closeSubs(); S.view = "ticket"; S.activeTicket = id; S.activeConv = null;
+  appEl.classList.add("show-main");
+  $("#main").innerHTML = `
+    <header class="m-head"><button class="back" id="back" aria-label="Back" style="display:block">‹</button><div class="grow"><h2 id="th-t">Ticket</h2><small id="th-s"></small></div></header>
+    <div class="t-body" id="tb"><div id="tdHead"></div><div class="panel"><h3>Updates</h3><div id="cmts"></div>
+      <form class="composer" id="cf" style="padding:10px 0 0;border:0;background:none"><textarea id="ct" rows="2" placeholder="Add an update or reply…"></textarea><button class="btn" type="submit">Post</button></form></div></div>`;
+  $("#back").onclick = openTickets;
+  renderTicketHead();
+  $("#cf").onsubmit = async e => {
+    e.preventDefault(); const text = $("#ct").value.trim(); if (!text) return; $("#ct").value = "";
+    try {
+      await addDoc(collection(db, "tickets", id, "comments"), { uid: uid(), name: myName(), text, createdAt: serverTimestamp() });
+      await updateDoc(doc(db, "tickets", id), { updatedAt: serverTimestamp() });
+    } catch { toast("Couldn't post update"); }
+  };
+  S.cmtUnsub = onSnapshot(query(collection(db, "tickets", id, "comments"), orderBy("createdAt", "asc")), snap => {
+    const el = $("#cmts"); if (!el) return;
+    el.innerHTML = snap.docs.map(data).map(c => `<div class="msg ${c.uid === uid() ? "mine" : ""}" style="max-width:100%;margin:6px 0">
+      <div class="who">${esc(userName(c.uid) || c.name)} · ${ago(ms(c.createdAt))}</div><div class="bubble">${linkify(c.text)}</div></div>`).join("") || '<div class="meta">No updates yet.</div>';
+  });
+  renderSidebar();
+}
+
+function renderTicketHead() {
+  const t = S.tickets.find(x => x.id === S.activeTicket), el = $("#tdHead"); if (!t || !el) return;
+  $("#th-t").textContent = t.code; $("#th-s").textContent = t.category;
+  const sel = (id, obj, cur) => `<select id="${id}">${Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${v}</option>`).join("")}</select>`;
+  const people = `<select id="f-as"><option value="">Unassigned</option>${Object.values(S.users).map(u => `<option value="${u.id}" ${u.id === t.assignedTo ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select>`;
+  el.innerHTML = `<div class="panel"><h3>${esc(t.title)}</h3>
+    <div class="meta"><span>Opened by ${esc(t.createdByName)}</span><span>${ago(ms(t.createdAt))}</span></div>
+    ${t.description ? `<p class="desc">${linkify(t.description)}</p>` : ""}
+    <div class="fields">
+      <div><label>Status</label>${sel("f-st", STATUSES, t.status)}</div>
+      <div><label>Priority</label>${sel("f-pr", PRIORITIES, t.priority)}</div>
+      <div><label>Assigned to</label>${people}</div>
+    </div></div>`;
+  const upd = (patch, note) => updateDoc(doc(db, "tickets", t.id), { ...patch, updatedAt: serverTimestamp() })
+    .then(() => note && postTo("tickets", note, true).catch(() => {})).catch(() => toast("Couldn't update ticket"));
+  $("#f-st").onchange = e => upd({ status: e.target.value }, `🔄 ${t.code} → ${STATUSES[e.target.value]} (by ${myName()})`);
+  $("#f-pr").onchange = e => upd({ priority: e.target.value }, `⚑ ${t.code} priority → ${PRIORITIES[e.target.value]} (by ${myName()})`);
+  $("#f-as").onchange = e => upd({ assignedTo: e.target.value }, `👤 ${t.code} assigned to ${e.target.value ? userName(e.target.value) : "no one"} (by ${myName()})`);
+}
+</script>
+</body>
+</html>

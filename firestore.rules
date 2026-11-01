@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function isAdmin() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(me())).data.role == 'admin';
+    }
+    function conv(cid) { return get(/databases/$(database)/documents/conversations/$(cid)).data; }
+    function canAccess(cid) { return conv(cid).everyone == true || me() in conv(cid).members; }
+
+    // Staff profiles. New users can only create themselves as "staff".
+    // Make someone an admin by editing their "role" field in the Firebase console.
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && userId == me() && request.resource.data.role == 'staff';
+      allow update: if signedIn() &&
+        ((userId == me() && request.resource.data.role == resource.data.role) || isAdmin());
+    }
+
+    // Channels (everyone == true), group chats and DMs (members only)
+    match /conversations/{cid} {
+      allow get: if signedIn() &&
+        (resource == null || resource.data.everyone == true || me() in resource.data.members);
+      allow list: if signedIn() &&
+        (resource.data.everyone == true || me() in resource.data.members);
+      allow create: if signedIn() && request.resource.data.createdBy == me() &&
+        (request.resource.data.everyone == false ? me() in request.resource.data.members : isAdmin());
+      allow update: if signedIn() &&
+        (resource.data.everyone == true || me() in resource.data.members);
+
+      match /messages/{mid} {
+        allow read: if signedIn() && canAccess(cid);
+        allow create: if signedIn() && canAccess(cid) && request.resource.data.uid == me();
+      }
+    }
+
+    // Support tickets (all staff can see and work every ticket)
+    match /tickets/{tid} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.createdBy == me();
+      allow update: if signedIn();
+      allow delete: if isAdmin();
+
+      match /comments/{cmid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.uid == me();
+      }
+    }
+
+    match /counters/{id} { allow read, write: if signedIn(); }
+
+    // Ticket categories etc. Only admins can change them.
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
