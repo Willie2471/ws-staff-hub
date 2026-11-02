@@ -120,6 +120,13 @@ a{color:var(--g-dark)}
 .pick input{width:auto}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:60;font-size:14px;max-width:90vw}
 
+/* ---------- photos ---------- */
+.pic{display:block;max-width:100%;max-height:280px;border-radius:10px;margin-bottom:4px;cursor:zoom-in;background:#e8ece9}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:70;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:12px}
+.lb img{max-width:100%;max-height:calc(100% - 40px);border-radius:8px;object-fit:contain}
+.lb a{color:#fff;font-size:14px}
+.composer .attach{height:44px;padding:0 12px;font-size:18px}
+
 /* ---------- phones ---------- */
 @media (max-width:760px){
   .sidebar{width:100%;border-right:0}
@@ -139,8 +146,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updateProfile }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, setDoc, addDoc,
-  updateDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction }
+  updateDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction, arrayUnion, arrayRemove }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getStorage, ref as sref, uploadBytes, getDownloadURL }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
+import { getMessaging, getToken, isSupported as msgSupported }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
 
 /* =====================================================================
    Setup check
@@ -157,6 +168,7 @@ const auth = getAuth(app);
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) // keeps working in weak field signal
 });
+const storage = getStorage(app);
 
 /* =====================================================================
    Constants & state
@@ -218,6 +230,52 @@ function modal(title, body, onMount) {
   document.body.appendChild(o);
   onMount && onMount(o, () => o.remove());
 }
+
+/* ---------- photos: pick, shrink, upload, enlarge ---------- */
+function pickPhotos(multiple) {
+  return new Promise(res => {
+    const i = document.createElement("input");
+    i.type = "file"; i.accept = "image/*"; i.multiple = !!multiple;
+    i.onchange = () => res([...i.files]);
+    i.oncancel = () => res([]);
+    i.click();
+  });
+}
+function resizeImage(file, max = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const r = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => b ? resolve(b) : reject(new Error("resize failed")), "image/jpeg", quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That file isn't a photo")); };
+    img.src = url;
+  });
+}
+async function uploadPhoto(file, folder) {
+  const blob = await resizeImage(file);
+  const path = `attachments/${folder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const r = sref(storage, path);
+  await uploadBytes(r, blob, { contentType: "image/jpeg" });
+  return getDownloadURL(r);
+}
+const photoImg = (u, extra = "") => `<img class="pic" src="${esc(u)}" loading="lazy" alt="photo" ${extra}>`;
+function photoError(e) {
+  console.error(e);
+  const m = String((e && (e.code || e.message)) || "");
+  toast(/unauthorized|permission|storage\/|bucket/i.test(m) ? "Photo upload isn't set up yet (Storage rules)" : "Couldn't send photo");
+}
+document.addEventListener("click", e => {
+  const im = e.target.closest("img.pic"); if (!im) return;
+  const o = document.createElement("div"); o.className = "lb";
+  o.innerHTML = `<img src="${esc(im.src)}" alt="photo"><a href="${esc(im.src)}" target="_blank" rel="noopener">Open original</a>`;
+  o.addEventListener("click", ev => { if (!ev.target.closest("a")) o.remove(); });
+  document.body.appendChild(o);
+});
 
 /* ---------- sound + notifications ---------- */
 let actx;
@@ -313,6 +371,7 @@ function renderLogin() {
 function startApp() {
   renderShell();
   const me = uid();
+  registerPush();
 
   S.unsub.push(onSnapshot(collection(db, "users"), snap => {
     S.users = {}; snap.forEach(d => S.users[d.id] = { id: d.id, ...d.data() });
@@ -327,6 +386,7 @@ function startApp() {
       snap.docChanges().forEach(ch => {
         if (ch.type === "removed") { delete S.convs[ch.doc.id]; return; }
         const c = data(ch.doc); S.convs[c.id] = c;
+        if (c.archived && S.activeConv === c.id) { goHome(); return; }
         maybeNotify(c, ready[i]);
         if (S.activeConv === c.id) markRead(c.id);
       });
@@ -364,7 +424,7 @@ async function seedDefaults() {
 function maybeNotify(c, isReady) {
   const t = ms(c.lastMessageAt), prev = S.seen[c.id];
   S.seen[c.id] = Math.max(t, prev || 0);
-  if (!isReady || prev === undefined) return;
+  if (!isReady || prev === undefined || c.archived) return;
   if (t > prev && c.lastMessageBy && c.lastMessageBy !== uid()) {
     const viewing = !document.hidden && S.activeConv === c.id;
     if (!viewing) { beep(); showNote(convTitle(c), c.lastMessageText || "New message", c.id); }
@@ -383,9 +443,10 @@ function renderShell() {
     else if (nav) openTickets();
     else if (e.target.closest("#newDm")) newDmModal();
     else if (e.target.closest("#newGroup")) newGroupModal();
+    else if (e.target.closest("#manageCh")) manageChannelsModal();
     else if (e.target.closest("#myName")) editName();
     else if (e.target.closest("#notif")) enableNotifications();
-    else if (e.target.closest("#signout")) signOut(auth);
+    else if (e.target.closest("#signout")) doSignOut();
   });
   renderEmptyMain();
   document.addEventListener("visibilitychange", () => { if (!document.hidden && S.activeConv) markRead(S.activeConv); updateTitle(); renderSidebar(); });
@@ -400,7 +461,7 @@ function convTitle(c) {
   return c.type === "channel" ? "# " + c.name : c.name;
 }
 const unreadRaw = c => c.lastMessageBy && c.lastMessageBy !== uid() && ms(c.lastMessageAt) > ms(c.lastRead?.[uid()]);
-const isUnread = c => unreadRaw(c) && !(S.activeConv === c.id && !document.hidden);
+const isUnread = c => !c.archived && unreadRaw(c) && !(S.activeConv === c.id && !document.hidden);
 const openTicketCount = () => S.tickets.filter(t => t.status !== "closed" && t.status !== "resolved").length;
 
 function updateTitle() {
@@ -415,7 +476,8 @@ function renderSidebar() {
       <span class="name">${esc(convTitle(c))}</span>${isUnread(c) ? '<span class="dot"></span>' : ""}</button>`;
   const order = id => { const i = CHANNELS.findIndex(c => c.id === id); return i < 0 ? 99 : i; };
   const byRecent = (a, b) => ms(b.lastMessageAt) - ms(a.lastMessageAt);
-  const channels = all.filter(c => c.type === "channel").sort((a, b) => order(a.id) - order(b.id));
+  const channels = all.filter(c => c.type === "channel" && !c.archived)
+    .sort((a, b) => order(a.id) - order(b.id) || ms(a.createdAt) - ms(b.createdAt));
   const groups = all.filter(c => c.type === "group").sort(byRecent);
   const dms = all.filter(c => c.type === "dm").sort(byRecent);
   const open = openTicketCount();
@@ -426,7 +488,7 @@ function renderSidebar() {
     <div class="sec" style="padding-top:10px">Support</div>
     <button class="row ${S.view === "tickets" || S.view === "ticket" ? "active" : ""}" data-nav="tickets">
       <span class="name">🎫 Support tickets</span>${open ? `<span class="badge gray">${open} open</span>` : ""}</button>
-    <div class="sec">Channels</div>${channels.map(row).join("") || '<div class="meta" style="padding:6px 10px">Waiting for an admin to set up channels…</div>'}
+    <div class="sec">Channels ${isAdmin() ? '<button class="plus" id="manageCh" title="Manage channels">⚙</button>' : ""}</div>${channels.map(row).join("") || '<div class="meta" style="padding:6px 10px">Waiting for an admin to set up channels…</div>'}
     <div class="sec">Groups <button class="plus" id="newGroup" title="New group">＋</button></div>${groups.map(row).join("")}
     <div class="sec">Direct messages <button class="plus" id="newDm" title="New message">＋</button></div>${dms.map(row).join("")}
   </div>
@@ -438,9 +500,36 @@ function renderSidebar() {
 }
 
 async function enableNotifications() {
-  try { const r = await Notification.requestPermission(); toast(r === "granted" ? "Notifications on" : "Notifications blocked"); }
-  catch { toast("Notifications aren't supported here"); }
+  try {
+    const r = await Notification.requestPermission();
+    if (r === "granted") {
+      const ok = await registerPush();
+      toast(ok ? "Alerts are on for this device" : "Notifications on (alerts while closed aren't set up yet)");
+    } else toast("Notifications blocked");
+  } catch { toast("Notifications aren't supported here"); }
   renderSidebar();
+}
+
+// Registers this device for push alerts (works when the app is closed). Needs vapidKey in config.js.
+async function registerPush() {
+  try {
+    if (!cfg.vapidKey || !("Notification" in window) || Notification.permission !== "granted") return false;
+    if (!("serviceWorker" in navigator) || !(await msgSupported())) return false;
+    const reg = await navigator.serviceWorker.ready;
+    const token = await getToken(getMessaging(app), { vapidKey: cfg.vapidKey, serviceWorkerRegistration: reg });
+    if (!token) return false;
+    await updateDoc(doc(db, "users", uid()), { tokens: arrayUnion(token) });
+    try { localStorage.setItem("wsTok", token); } catch {}
+    return true;
+  } catch (e) { console.error("push setup failed", e); return false; }
+}
+
+async function doSignOut() {
+  try {
+    const t = localStorage.getItem("wsTok");
+    if (t && S.me) { await updateDoc(doc(db, "users", uid()), { tokens: arrayRemove(t) }); localStorage.removeItem("wsTok"); }
+  } catch {}
+  signOut(auth);
 }
 
 async function editName() {
@@ -448,6 +537,51 @@ async function editName() {
   if (!n || !n.trim()) return;
   try { await updateDoc(doc(db, "users", uid()), { name: n.trim() }); await updateProfile(S.me, { displayName: n.trim() }); }
   catch { toast("Couldn't save name"); }
+}
+
+/* ---------- admin: manage channels ---------- */
+function manageChannelsModal() {
+  if (!isAdmin()) return;
+  const order = id => { const i = CHANNELS.findIndex(c => c.id === id); return i < 0 ? 99 : i; };
+  const chans = Object.values(S.convs).filter(c => c.type === "channel")
+    .sort((a, b) => order(a.id) - order(b.id) || ms(a.createdAt) - ms(b.createdAt));
+  const rowHtml = c => `<div class="panel" data-id="${esc(c.id)}" style="padding:10px">
+      <div class="f"><label>Name</label><input class="cn" value="${esc(c.name)}" maxlength="30"></div>
+      <div class="f"><label>Description</label><input class="cd" value="${esc(c.desc || "")}" maxlength="80"></div>
+      ${c.id === "tickets"
+        ? '<div class="meta">The ticket feed can be renamed but not hidden.</div>'
+        : `<label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" class="ch" ${c.archived ? "checked" : ""} style="width:auto"> Hide this channel</label>`}
+    </div>`;
+  modal("Manage channels", `${chans.map(rowHtml).join("")}
+    <div class="panel" style="padding:10px"><b>Add a channel</b>
+      <div class="f" style="margin-top:8px"><label>Name</label><input id="ann" placeholder="e.g. equipment" maxlength="30"></div>
+      <div class="f"><label>Description (optional)</label><input id="and" maxlength="80"></div></div>
+    <p class="meta">Names are lowercase with dashes. Hidden channels keep their messages and can be shown again.</p>
+    <button class="btn full" id="mcs">Save changes</button>`, (o, close) => {
+    const clean = s => s.toLowerCase().trim().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
+    $("#mcs", o).onclick = async () => {
+      const btn = $("#mcs", o); btn.disabled = true;
+      try {
+        const b = writeBatch(db); let n = 0;
+        o.querySelectorAll("[data-id]").forEach(row => {
+          const id = row.dataset.id, c = S.convs[id]; if (!c) return;
+          const name = clean($(".cn", row).value) || c.name, desc = $(".cd", row).value.trim();
+          const archived = id === "tickets" ? false : !!$(".ch", row)?.checked;
+          if (name !== c.name || desc !== (c.desc || "") || archived !== !!c.archived) {
+            b.update(doc(db, "conversations", id), { name, desc, archived }); n++;
+          }
+        });
+        const nn = clean($("#ann", o).value);
+        if (nn) {
+          b.set(doc(collection(db, "conversations")), { type: "channel", name: nn, desc: $("#and", o).value.trim(),
+            everyone: true, members: [], archived: false, createdBy: uid(), createdAt: serverTimestamp(), lastMessageAt: serverTimestamp() });
+          n++;
+        }
+        if (n) await b.commit();
+        close(); toast(n ? "Channels updated" : "No changes");
+      } catch (x) { console.error(x); toast("Couldn't save channels"); btn.disabled = false; }
+    };
+  });
 }
 
 /* ---------- new DM / group ---------- */
@@ -503,13 +637,20 @@ function openChat(id) {
   $("#main").innerHTML = `
     <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div></header>
     <div class="msgs" id="msgs"></div>
-    <form class="composer" id="composer"><textarea id="txt" rows="1" placeholder="Message…" enterkeyhint="send"></textarea><button class="btn" type="submit">Send</button></form>`;
+    <form class="composer" id="composer"><button type="button" class="btn ghost attach" id="attach" title="Send a photo" aria-label="Send a photo">📎</button><textarea id="txt" rows="1" placeholder="Message…" enterkeyhint="send"></textarea><button class="btn" type="submit">Send</button></form>`;
   refreshHeader();
   $("#back").onclick = goHome;
   const txt = $("#txt");
   txt.addEventListener("input", () => { txt.style.height = "auto"; txt.style.height = Math.min(txt.scrollHeight, 140) + "px"; });
   txt.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !coarse()) { e.preventDefault(); $("#composer").requestSubmit(); } });
   $("#composer").onsubmit = e => { e.preventDefault(); const v = txt.value; txt.value = ""; txt.style.height = "auto"; sendMsg(v); };
+  $("#attach").onclick = async () => {
+    const cid = S.activeConv, files = await pickPhotos(true); if (!files.length || !cid) return;
+    const btn = $("#attach"); if (btn) { btn.disabled = true; btn.textContent = "…"; }
+    try { for (const f of files.slice(0, 5)) await postTo(cid, "", false, await uploadPhoto(f, cid)); }
+    catch (e) { photoError(e); }
+    const b2 = $("#attach"); if (b2) { b2.disabled = false; b2.textContent = "📎"; }
+  };
   if (!coarse()) txt.focus();
 
   S.msgUnsub = onSnapshot(query(collection(db, "conversations", id, "messages"), orderBy("createdAt", "desc"), limit(300)), snap => {
@@ -539,10 +680,13 @@ function renderMessages() {
     if (m.system) { html += `<div class="sys">${linkify(m.text)}</div>`; lastUid = null; continue; }
     const mine = m.uid === uid(), first = m.uid !== lastUid; lastUid = m.uid;
     html += `<div class="msg ${mine ? "mine" : ""} ${first ? "first" : ""}">${first && !mine ? `<div class="who">${esc(S.users[m.uid]?.name || m.name)}</div>` : ""}
-      <div class="bubble">${linkify(m.text)}<span class="t">${fmtTime(d)}</span></div></div>`;
+      <div class="bubble">${m.img ? photoImg(m.img) : ""}${m.text ? linkify(m.text) : ""}<span class="t">${fmtTime(d)}</span></div></div>`;
   }
   el.innerHTML = html; el.dataset.init = "1";
-  if (stick) el.scrollTop = el.scrollHeight;
+  if (stick) {
+    el.scrollTop = el.scrollHeight;
+    el.querySelectorAll("img.pic").forEach(im => im.addEventListener("load", () => { el.scrollTop = el.scrollHeight; }));
+  }
 }
 
 function markRead(id) {
@@ -553,11 +697,11 @@ function markRead(id) {
   updateDoc(doc(db, "conversations", id), { ["lastRead." + uid()]: serverTimestamp() }).catch(() => {});
 }
 
-function postTo(convId, text, system) {
+function postTo(convId, text, system, img) {
   const b = writeBatch(db);
-  b.set(doc(collection(db, "conversations", convId, "messages")), { uid: uid(), name: myName(), text, system: !!system, createdAt: serverTimestamp() });
+  b.set(doc(collection(db, "conversations", convId, "messages")), { uid: uid(), name: myName(), text, system: !!system, createdAt: serverTimestamp(), ...(img ? { img } : {}) });
   b.update(doc(db, "conversations", convId), {
-    lastMessageAt: serverTimestamp(), lastMessageBy: uid(), lastMessageText: text.slice(0, 120), ["lastRead." + uid()]: serverTimestamp()
+    lastMessageAt: serverTimestamp(), lastMessageBy: uid(), lastMessageText: text ? text.slice(0, 120) : "📷 Photo", ["lastRead." + uid()]: serverTimestamp()
   });
   return b.commit();
 }
@@ -610,12 +754,21 @@ function newTicketModal() {
     <div class="f"><label>Category</label><select id="nc">${opts(S.cats)}</select></div>
     <div class="f"><label>Priority</label><select id="np">${Object.entries(PRIORITIES).map(([k, v]) => `<option value="${k}" ${k === "normal" ? "selected" : ""}>${v}</option>`).join("")}</select></div>
     <div class="f"><label>Details</label><textarea id="nd" rows="5" placeholder="What happened? Where? What have you tried?"></textarea></div>
+    <div class="f"><label>Photos (optional)</label><button type="button" class="btn ghost" id="np-add">📷 Add photos</button> <span class="meta" id="np-count"></span></div>
     <div class="f"><label>Assign to (optional)</label><select id="na"><option value="">Unassigned</option>${people}</select></div>
     <button class="btn full" id="ns">Submit ticket</button>`, (o, close) => {
+    let photos = [];
+    $("#np-add", o).onclick = async () => {
+      const f = await pickPhotos(true); if (!f.length) return;
+      photos = photos.concat(f).slice(0, 6);
+      $("#np-count", o).textContent = photos.length + (photos.length === 1 ? " photo attached" : " photos attached");
+    };
     $("#ns", o).onclick = async () => {
       const title = $("#nt", o).value.trim(); if (!title) return toast("Add a short title");
-      $("#ns", o).disabled = true;
+      $("#ns", o).disabled = true; if (photos.length) $("#ns", o).textContent = "Uploading photos…";
       try {
+        const urls = [];
+        for (const f of photos) urls.push(await uploadPhoto(f, "tickets"));
         const n = await runTransaction(db, async tx => {
           const r = doc(db, "counters", "tickets"), s = await tx.get(r), v = (s.exists() ? s.data().n : 0) + 1;
           tx.set(r, { n: v }); return v;
@@ -623,11 +776,15 @@ function newTicketModal() {
         const code = "WS-" + String(n).padStart(4, "0"), category = $("#nc", o).value, priority = $("#np", o).value;
         const ref = await addDoc(collection(db, "tickets"), {
           number: n, code, title, category, priority, status: "open", description: $("#nd", o).value.trim(),
+          photos: urls,
           createdBy: uid(), createdByName: myName(), assignedTo: $("#na", o).value, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         postTo("tickets", `🎫 ${code} opened by ${myName()}: ${title} (${category} · ${PRIORITIES[priority]})`, true).catch(() => {});
         close(); openTicket(ref.id);
-      } catch (x) { console.error(x); toast("Couldn't create ticket (are you online?)"); $("#ns", o).disabled = false; }
+      } catch (x) {
+        if (/storage\//.test(String(x.code))) photoError(x); else { console.error(x); toast("Couldn't create ticket (are you online?)"); }
+        $("#ns", o).disabled = false; $("#ns", o).textContent = "Submit ticket";
+      }
     };
   });
 }
@@ -650,7 +807,7 @@ function openTicket(id) {
   $("#main").innerHTML = `
     <header class="m-head"><button class="back" id="back" aria-label="Back" style="display:block">‹</button><div class="grow"><h2 id="th-t">Ticket</h2><small id="th-s"></small></div></header>
     <div class="t-body" id="tb"><div id="tdHead"></div><div class="panel"><h3>Updates</h3><div id="cmts"></div>
-      <form class="composer" id="cf" style="padding:10px 0 0;border:0;background:none"><textarea id="ct" rows="2" placeholder="Add an update or reply…"></textarea><button class="btn" type="submit">Post</button></form></div></div>`;
+      <form class="composer" id="cf" style="padding:10px 0 0;border:0;background:none"><button type="button" class="btn ghost attach" id="cattach" title="Add a photo" aria-label="Add a photo">📎</button><textarea id="ct" rows="2" placeholder="Add an update or reply…"></textarea><button class="btn" type="submit">Post</button></form></div></div>`;
   $("#back").onclick = openTickets;
   renderTicketHead();
   $("#cf").onsubmit = async e => {
@@ -660,10 +817,22 @@ function openTicket(id) {
       await updateDoc(doc(db, "tickets", id), { updatedAt: serverTimestamp() });
     } catch { toast("Couldn't post update"); }
   };
+  $("#cattach").onclick = async () => {
+    const files = await pickPhotos(true); if (!files.length) return;
+    const b = $("#cattach"); if (b) { b.disabled = true; b.textContent = "…"; }
+    try {
+      for (const f of files.slice(0, 5)) {
+        const url = await uploadPhoto(f, "tickets/" + id);
+        await addDoc(collection(db, "tickets", id, "comments"), { uid: uid(), name: myName(), text: "", img: url, createdAt: serverTimestamp() });
+      }
+      await updateDoc(doc(db, "tickets", id), { updatedAt: serverTimestamp() });
+    } catch (e) { photoError(e); }
+    const b2 = $("#cattach"); if (b2) { b2.disabled = false; b2.textContent = "📎"; }
+  };
   S.cmtUnsub = onSnapshot(query(collection(db, "tickets", id, "comments"), orderBy("createdAt", "asc")), snap => {
     const el = $("#cmts"); if (!el) return;
     el.innerHTML = snap.docs.map(data).map(c => `<div class="msg ${c.uid === uid() ? "mine" : ""}" style="max-width:100%;margin:6px 0">
-      <div class="who">${esc(userName(c.uid) || c.name)} · ${ago(ms(c.createdAt))}</div><div class="bubble">${linkify(c.text)}</div></div>`).join("") || '<div class="meta">No updates yet.</div>';
+      <div class="who">${esc(userName(c.uid) || c.name)} · ${ago(ms(c.createdAt))}</div><div class="bubble">${c.img ? photoImg(c.img) : ""}${c.text ? linkify(c.text) : ""}</div></div>`).join("") || '<div class="meta">No updates yet.</div>';
   });
   renderSidebar();
 }
@@ -676,6 +845,7 @@ function renderTicketHead() {
   el.innerHTML = `<div class="panel"><h3>${esc(t.title)}</h3>
     <div class="meta"><span>Opened by ${esc(t.createdByName)}</span><span>${ago(ms(t.createdAt))}</span></div>
     ${t.description ? `<p class="desc">${linkify(t.description)}</p>` : ""}
+    ${(t.photos || []).map(u => photoImg(u, 'style="display:inline-block;margin:6px 6px 0 0;max-height:150px"')).join("")}
     <div class="fields">
       <div><label>Status</label>${sel("f-st", STATUSES, t.status)}</div>
       <div><label>Priority</label>${sel("f-pr", PRIORITIES, t.priority)}</div>
