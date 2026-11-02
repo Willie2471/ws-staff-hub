@@ -126,6 +126,9 @@ a{color:var(--g-dark)}
 .lb img{max-width:100%;max-height:calc(100% - 40px);border-radius:8px;object-fit:contain}
 .lb a{color:#fff;font-size:14px}
 .composer .attach{height:44px;padding:0 12px;font-size:18px}
+.mdel{background:none;border:0;color:var(--muted);font-size:11px;padding:2px 6px;opacity:.7;margin-top:1px}
+.mdel:hover{color:var(--danger);opacity:1}
+.danger{color:var(--danger)!important}
 
 /* ---------- phones ---------- */
 @media (max-width:760px){
@@ -146,9 +149,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/fireba
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, updateProfile }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, getDoc, setDoc, addDoc,
-  updateDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction, arrayUnion, arrayRemove }
+  updateDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction, arrayUnion, arrayRemove, deleteDoc, getDocs }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { getStorage, ref as sref, uploadBytes, getDownloadURL }
+import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js";
 import { getMessaging, getToken, isSupported as msgSupported }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
@@ -377,6 +380,7 @@ function startApp() {
     S.users = {}; snap.forEach(d => S.users[d.id] = { id: d.id, ...d.data() });
     if (!S.seeded && isAdmin()) { S.seeded = true; seedDefaults(); }
     renderSidebar(); refreshHeader();
+    if (S.view === "chat") renderMessages();
   }, console.error));
 
   const ready = [false, false];
@@ -635,11 +639,13 @@ function openChat(id) {
   S.view = "chat"; S.activeConv = id; S.activeTicket = null; S.msgs = [];
   appEl.classList.add("show-main");
   $("#main").innerHTML = `
-    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div></header>
+    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div><button class="btn ghost danger" id="clearCh" hidden title="Delete every message in this chat (admin only)">Clear</button></header>
     <div class="msgs" id="msgs"></div>
     <form class="composer" id="composer"><button type="button" class="btn ghost attach" id="attach" title="Send a photo" aria-label="Send a photo">📎</button><textarea id="txt" rows="1" placeholder="Message…" enterkeyhint="send"></textarea><button class="btn" type="submit">Send</button></form>`;
   refreshHeader();
   $("#back").onclick = goHome;
+  $("#clearCh").onclick = clearChannel;
+  $("#msgs").onclick = e => { const b = e.target.closest("[data-mid]"); if (b) delMessage(b.dataset.mid); };
   const txt = $("#txt");
   txt.addEventListener("input", () => { txt.style.height = "auto"; txt.style.height = Math.min(txt.scrollHeight, 140) + "px"; });
   txt.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !coarse()) { e.preventDefault(); $("#composer").requestSubmit(); } });
@@ -665,6 +671,7 @@ function refreshHeader() {
   if (S.view !== "chat") return;
   const c = S.convs[S.activeConv], t = $("#ch-t"), s = $("#ch-s"); if (!c || !t) return;
   t.textContent = convTitle(c);
+  const cb = $("#clearCh"); if (cb) cb.hidden = !isAdmin();
   s.textContent = c.type === "channel" ? (c.desc || "Everyone") :
     c.type === "group" ? c.members.map(userName).join(", ") : "Direct message";
 }
@@ -677,10 +684,10 @@ function renderMessages() {
   for (const m of S.msgs) {
     const d = new Date(ms(m.createdAt) || Date.now()), day = d.toDateString();
     if (day !== lastDay) { html += `<div class="day">${fmtDay(d)}</div>`; lastDay = day; lastUid = null; }
-    if (m.system) { html += `<div class="sys">${linkify(m.text)}</div>`; lastUid = null; continue; }
+    if (m.system) { html += `<div class="sys">${linkify(m.text)}${isAdmin() ? ` <button class="mdel" data-mid="${esc(m.id)}" title="Delete (admin)">✕</button>` : ""}</div>`; lastUid = null; continue; }
     const mine = m.uid === uid(), first = m.uid !== lastUid; lastUid = m.uid;
     html += `<div class="msg ${mine ? "mine" : ""} ${first ? "first" : ""}">${first && !mine ? `<div class="who">${esc(S.users[m.uid]?.name || m.name)}</div>` : ""}
-      <div class="bubble">${m.img ? photoImg(m.img) : ""}${m.text ? linkify(m.text) : ""}<span class="t">${fmtTime(d)}</span></div></div>`;
+      <div class="bubble">${m.img ? photoImg(m.img) : ""}${m.text ? linkify(m.text) : ""}<span class="t">${fmtTime(d)}</span></div>${isAdmin() ? `<button class="mdel" data-mid="${esc(m.id)}">Delete</button>` : ""}</div>`;
   }
   el.innerHTML = html; el.dataset.init = "1";
   if (stick) {
@@ -704,6 +711,41 @@ function postTo(convId, text, system, img) {
     lastMessageAt: serverTimestamp(), lastMessageBy: uid(), lastMessageText: text ? text.slice(0, 120) : "📷 Photo", ["lastRead." + uid()]: serverTimestamp()
   });
   return b.commit();
+}
+
+/* ---------- admin: delete messages / clear a chat ---------- */
+async function delMessage(mid) {
+  const cid = S.activeConv, m = S.msgs.find(x => x.id === mid);
+  if (!isAdmin() || !cid || !m) return;
+  if (!confirm("Delete this message for everyone? This can't be undone.")) return;
+  try {
+    await deleteDoc(doc(db, "conversations", cid, "messages", mid));
+    if (m.img) deleteObject(sref(storage, m.img)).catch(() => {});
+    toast("Message deleted");
+  } catch (e) { console.error(e); toast("Couldn't delete. Publish the updated rules first."); }
+}
+
+async function clearChannel() {
+  const id = S.activeConv, c = S.convs[id];
+  if (!isAdmin() || !c) return;
+  if (!confirm(`Delete ALL messages and photos in ${convTitle(c)}? This can't be undone.`)) return;
+  const btn = $("#clearCh"); if (btn) btn.disabled = true;
+  try {
+    let n = 0;
+    for (;;) {
+      const snap = await getDocs(query(collection(db, "conversations", id, "messages"), limit(400)));
+      if (snap.empty) break;
+      const b = writeBatch(db);
+      snap.docs.forEach(d => {
+        b.delete(d.ref); n++;
+        const u = d.data().img; if (u) deleteObject(sref(storage, u)).catch(() => {});
+      });
+      await b.commit();
+    }
+    await updateDoc(doc(db, "conversations", id), { lastMessageText: "", lastMessageBy: "" });
+    toast(`Cleared ${n} message${n === 1 ? "" : "s"}`);
+  } catch (e) { console.error(e); toast("Couldn't clear. Publish the updated rules first."); }
+  const b2 = $("#clearCh"); if (b2) b2.disabled = false;
 }
 
 function sendMsg(text) {
@@ -744,6 +786,23 @@ function renderTicketList() {
     if (c) { S.ticketFilter = c.dataset.f; renderTicketList(); }
     else if (t) openTicket(t.dataset.t);
   };
+}
+
+async function delTicket(id) {
+  const t = S.tickets.find(x => x.id === id);
+  if (!isAdmin() || !t) return;
+  if (!confirm(`Delete ticket ${t.code} with all its replies and photos? This can't be undone.`)) return;
+  const wasLast = S.tickets.every(x => x.id === id); // numbering restarts at WS-0001 when none are left
+  try {
+    const cs = await getDocs(collection(db, "tickets", id, "comments"));
+    const b = writeBatch(db);
+    cs.docs.forEach(d => { b.delete(d.ref); const u = d.data().img; if (u) deleteObject(sref(storage, u)).catch(() => {}); });
+    (t.photos || []).forEach(u => deleteObject(sref(storage, u)).catch(() => {}));
+    b.delete(doc(db, "tickets", id));
+    await b.commit();
+    if (wasLast) await setDoc(doc(db, "counters", "tickets"), { n: 0 });
+    toast("Ticket deleted"); openTickets();
+  } catch (e) { console.error(e); toast("Couldn't delete. Publish the updated rules first."); }
 }
 
 function newTicketModal() {
@@ -850,7 +909,9 @@ function renderTicketHead() {
       <div><label>Status</label>${sel("f-st", STATUSES, t.status)}</div>
       <div><label>Priority</label>${sel("f-pr", PRIORITIES, t.priority)}</div>
       <div><label>Assigned to</label>${people}</div>
-    </div></div>`;
+    </div>
+    ${isAdmin() ? '<div style="margin-top:14px"><button class="btn ghost danger" id="delT">Delete ticket (admin)</button></div>' : ""}</div>`;
+  if ($("#delT")) $("#delT").onclick = () => delTicket(t.id);
   const upd = (patch, note) => updateDoc(doc(db, "tickets", t.id), { ...patch, updatedAt: serverTimestamp() })
     .then(() => note && postTo("tickets", note, true).catch(() => {})).catch(() => toast("Couldn't update ticket"));
   $("#f-st").onchange = e => upd({ status: e.target.value }, `🔄 ${t.code} → ${STATUSES[e.target.value]} (by ${myName()})`);
