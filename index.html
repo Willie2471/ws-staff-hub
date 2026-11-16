@@ -388,7 +388,7 @@ function startApp() {
    query(collection(db, "conversations"), where("everyone", "==", true))].forEach((q, i) => {
     S.unsub.push(onSnapshot(q, snap => {
       snap.docChanges().forEach(ch => {
-        if (ch.type === "removed") { delete S.convs[ch.doc.id]; return; }
+        if (ch.type === "removed") { delete S.convs[ch.doc.id]; if (S.activeConv === ch.doc.id) { goHome(); } return; }
         const c = data(ch.doc); S.convs[c.id] = c;
         if (c.archived && S.activeConv === c.id) { goHome(); return; }
         maybeNotify(c, ready[i]);
@@ -588,6 +588,44 @@ function manageChannelsModal() {
   });
 }
 
+/* ---------- edit / delete a group ---------- */
+function groupSettingsModal() {
+  const id = S.activeConv, c = S.convs[id];
+  if (!c || c.type !== "group") return;
+  const canDelete = isAdmin() || c.createdBy === uid();
+  const users = Object.values(S.users);
+  modal("Group settings", `
+    <div class="f"><label>Group name</label><input id="gsn" value="${esc(c.name || "")}" maxlength="40"></div>
+    <label>Members</label>
+    ${users.map(u => `<label class="pick"><input type="checkbox" value="${u.id}" ${(c.members || []).includes(u.id) ? "checked" : ""} ${u.id === uid() ? "disabled" : ""}> <b>${esc(u.name)}</b>${u.id === uid() ? " (you)" : ""}</label>`).join("")}
+    <button class="btn full" id="gss">Save changes</button>
+    ${canDelete ? '<button class="btn full ghost danger" id="gsd" style="margin-top:10px">Delete this group</button>' : '<p class="meta">Only the person who created the group, or an admin, can delete it.</p>'}`, (o, close) => {
+    $("#gss", o).onclick = async () => {
+      const name = $("#gsn", o).value.trim(); if (!name) return toast("Give the group a name");
+      const picked = [...o.querySelectorAll("input[type=checkbox]:checked:not(:disabled)")].map(i => i.value);
+      const members = [uid(), ...picked];
+      try { await updateDoc(doc(db, "conversations", id), { name, members }); close(); toast("Group updated"); }
+      catch (x) { console.error(x); toast("Couldn't save group"); }
+    };
+    const d = $("#gsd", o);
+    if (d) d.onclick = async () => {
+      if (!confirm(`Delete the group "${c.name}" and all its messages for everyone? This can't be undone.`)) return;
+      d.disabled = true;
+      try {
+        for (;;) {
+          const snap = await getDocs(query(collection(db, "conversations", id, "messages"), limit(400)));
+          if (snap.empty) break;
+          const b = writeBatch(db);
+          snap.docs.forEach(m => { b.delete(m.ref); const u = m.data().img; if (u) deleteObject(sref(storage, u)).catch(() => {}); });
+          await b.commit();
+        }
+        await deleteDoc(doc(db, "conversations", id));
+        close(); toast("Group deleted");
+      } catch (x) { console.error(x); toast("Couldn't delete. Publish the updated rules first."); d.disabled = false; }
+    };
+  });
+}
+
 /* ---------- new DM / group ---------- */
 function newDmModal() {
   const others = Object.values(S.users).filter(u => u.id !== uid());
@@ -639,12 +677,13 @@ function openChat(id) {
   S.view = "chat"; S.activeConv = id; S.activeTicket = null; S.msgs = [];
   appEl.classList.add("show-main");
   $("#main").innerHTML = `
-    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div><button class="btn ghost danger" id="clearCh" hidden title="Delete every message in this chat (admin only)">Clear</button></header>
+    <header class="m-head"><button class="back" id="back" aria-label="Back">‹</button><div class="grow"><h2 id="ch-t"></h2><small id="ch-s"></small></div><button class="btn ghost" id="grpSet" hidden title="Rename, change members or delete this group">⚙ Group</button><button class="btn ghost danger" id="clearCh" hidden title="Delete every message in this chat (admin only)">Clear</button></header>
     <div class="msgs" id="msgs"></div>
     <form class="composer" id="composer"><button type="button" class="btn ghost attach" id="attach" title="Send a photo" aria-label="Send a photo">📎</button><textarea id="txt" rows="1" placeholder="Message…" enterkeyhint="send"></textarea><button class="btn" type="submit">Send</button></form>`;
   refreshHeader();
   $("#back").onclick = goHome;
   $("#clearCh").onclick = clearChannel;
+  $("#grpSet").onclick = groupSettingsModal;
   $("#msgs").onclick = e => { const b = e.target.closest("[data-mid]"); if (b) delMessage(b.dataset.mid); };
   const txt = $("#txt");
   txt.addEventListener("input", () => { txt.style.height = "auto"; txt.style.height = Math.min(txt.scrollHeight, 140) + "px"; });
@@ -672,6 +711,7 @@ function refreshHeader() {
   const c = S.convs[S.activeConv], t = $("#ch-t"), s = $("#ch-s"); if (!c || !t) return;
   t.textContent = convTitle(c);
   const cb = $("#clearCh"); if (cb) cb.hidden = !isAdmin();
+  const gb = $("#grpSet"); if (gb) gb.hidden = c.type !== "group";
   s.textContent = c.type === "channel" ? (c.desc || "Everyone") :
     c.type === "group" ? c.members.map(userName).join(", ") : "Direct message";
 }
