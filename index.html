@@ -809,17 +809,20 @@ function openTickets() {
   renderTicketList(); renderSidebar();
 }
 
+const ticketOwners = t => [...new Set([...(t.assignees || []), t.assignedTo].filter(Boolean))];
+const ownerNames = t => ticketOwners(t).map(userName).join(" + ");
+
 function renderTicketList() {
   const tb = $("#tb"); if (!tb || S.view !== "tickets") return;
   const isOpen = t => t.status !== "closed" && t.status !== "resolved";
   const f = S.ticketFilter;
-  const list = S.tickets.filter(t => f === "open" ? isOpen(t) : f === "mine" ? isOpen(t) && t.assignedTo === uid() : f === "done" ? !isOpen(t) : true);
+  const list = S.tickets.filter(t => f === "open" ? isOpen(t) : f === "mine" ? isOpen(t) && ticketOwners(t).includes(uid()) : f === "done" ? !isOpen(t) : true);
   const chip = (k, l) => `<button class="chip ${f === k ? "on" : ""}" data-f="${k}">${l}</button>`;
   tb.innerHTML = `<div class="chips">${chip("open", "Open")}${chip("mine", "Assigned to me")}${chip("done", "Resolved / closed")}${chip("all", "All")}</div>` +
     (list.map(t => `<button class="tcard" data-t="${t.id}">
       <div class="top"><span class="code">${esc(t.code)} · ${esc(t.category)}</span><span><span class="pill p-${t.priority}">${PRIORITIES[t.priority] || t.priority}</span> <span class="pill s-${t.status}">${STATUSES[t.status] || t.status}</span></span></div>
       <h3>${esc(t.title)}</h3>
-      <div class="meta"><span>From ${esc(t.createdByName)}</span><span>${t.assignedTo ? "Assigned to " + esc(userName(t.assignedTo)) : "Unassigned"}</span><span>${ago(ms(t.createdAt))}</span></div>
+      <div class="meta"><span>${t.source === "email" ? "📥 " : ""}From ${esc(t.createdByName)}</span><span>${ticketOwners(t).length ? "Assigned to " + esc(ownerNames(t)) : "Unassigned"}</span>${t.dueDate ? `<span>Due ${esc(t.dueDate)}</span>` : ""}<span>${ago(ms(t.createdAt))}</span></div>
     </button>`).join("") || `<div class="empty">No tickets here. 🎉</div>`);
   tb.onclick = e => {
     const c = e.target.closest("[data-f]"), t = e.target.closest("[data-t]");
@@ -943,12 +946,15 @@ function renderTicketHead() {
   const people = `<select id="f-as"><option value="">Unassigned</option>${Object.values(S.users).map(u => `<option value="${u.id}" ${u.id === t.assignedTo ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select>`;
   el.innerHTML = `<div class="panel"><h3>${esc(t.title)}</h3>
     <div class="meta"><span>Opened by ${esc(t.createdByName)}</span><span>${ago(ms(t.createdAt))}</span></div>
+    ${t.source === "email" ? `<div class="meta" style="margin-top:6px">📥 Created automatically${t.emailSource ? " by " + esc(t.emailSource) : ""}</div>` : ""}
+    ${ticketOwners(t).length > 1 ? `<div class="meta" style="margin-top:6px">Assigned to: ${esc(ownerNames(t))}</div>` : ""}
     ${t.description ? `<p class="desc">${linkify(t.description)}</p>` : ""}
     ${(t.photos || []).map(u => photoImg(u, 'style="display:inline-block;margin:6px 6px 0 0;max-height:150px"')).join("")}
     <div class="fields">
       <div><label>Status</label>${sel("f-st", STATUSES, t.status)}</div>
       <div><label>Priority</label>${sel("f-pr", PRIORITIES, t.priority)}</div>
-      <div><label>Assigned to</label>${people}</div>
+      <div><label>${ticketOwners(t).length > 1 ? "Main person" : "Assigned to"}</label>${people}</div>
+      <div><label>Due date</label><input type="date" id="f-du" value="${esc(t.dueDate || "")}"></div>
     </div>
     ${isAdmin() ? '<div style="margin-top:14px"><button class="btn ghost danger" id="delT">Delete ticket (admin)</button></div>' : ""}</div>`;
   if ($("#delT")) $("#delT").onclick = () => delTicket(t.id);
@@ -956,7 +962,8 @@ function renderTicketHead() {
     .then(() => note && postTo("tickets", note, true).catch(() => {})).catch(() => toast("Couldn't update ticket"));
   $("#f-st").onchange = e => upd({ status: e.target.value }, `🔄 ${t.code} → ${STATUSES[e.target.value]} (by ${myName()})`);
   $("#f-pr").onchange = e => upd({ priority: e.target.value }, `⚑ ${t.code} priority → ${PRIORITIES[e.target.value]} (by ${myName()})`);
-  $("#f-as").onchange = e => upd({ assignedTo: e.target.value }, `👤 ${t.code} assigned to ${e.target.value ? userName(e.target.value) : "no one"} (by ${myName()})`);
+  $("#f-du").onchange = e => upd({ dueDate: e.target.value }, `📅 ${t.code} due date → ${e.target.value || "none"} (by ${myName()})`);
+  $("#f-as").onchange = e => upd({ assignedTo: e.target.value, assignees: e.target.value ? [e.target.value] : [] }, `👤 ${t.code} assigned to ${e.target.value ? userName(e.target.value) : "no one"} (by ${myName()})`);
 }
 </script>
 </body>
