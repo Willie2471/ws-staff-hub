@@ -198,6 +198,18 @@ const S = {
   seen: {}, seeded: false, lastMark: 0
 };
 
+/* ---------- quick-message link: index.html?channel=field opens that channel with the message box ready ---------- */
+const WANT_CHANNEL = (new URLSearchParams(location.search).get("channel") || "").trim();
+let wantDone = !WANT_CHANNEL;
+function deepLink() {
+  if (wantDone) return;
+  const c = S.convs[WANT_CHANNEL];
+  if (!c || c.archived) return;
+  wantDone = true;
+  openChat(WANT_CHANNEL);
+  setTimeout(() => { const t = document.getElementById("txt"); if (t) t.focus(); }, 200);
+}
+
 /* =====================================================================
    Helpers
    ===================================================================== */
@@ -400,6 +412,7 @@ function startApp() {
       });
       ready[i] = true;
       renderSidebar(); updateTitle(); refreshHeader();
+      deepLink();
     }, console.error));
   });
 
