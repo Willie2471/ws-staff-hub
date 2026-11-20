@@ -252,12 +252,27 @@ function modal(title, body, onMount) {
 
 /* ---------- photos: pick, shrink, upload, enlarge ---------- */
 function pickPhotos(multiple) {
-  return new Promise(res => {
+  const open = (camera, res) => {
     const i = document.createElement("input");
-    i.type = "file"; i.accept = "image/*"; i.multiple = !!multiple;
+    i.type = "file"; i.accept = "image/*";
+    if (camera) i.setAttribute("capture", "environment"); else i.multiple = !!multiple;
     i.onchange = () => res([...i.files]);
     i.oncancel = () => res([]);
     i.click();
+  };
+  return new Promise(res => {
+    if (!coarse()) return open(false, res); // computers: normal file picker
+    // phones/tablets: camera first, gallery as the second choice
+    const o = document.createElement("div");
+    o.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:12px";
+    o.innerHTML = `<div style="background:#fff;border-radius:14px;width:min(480px,100%);padding:12px;display:flex;flex-direction:column;gap:8px">
+      <button class="btn" id="pk-cam" style="padding:14px">📷 Take a photo</button>
+      <button class="btn ghost" id="pk-gal" style="padding:14px">🖼 Choose from gallery</button>
+      <button class="linkbtn" id="pk-x" style="padding:8px;font-size:14px">Cancel</button></div>`;
+    document.body.appendChild(o);
+    o.querySelector("#pk-cam").onclick = () => { o.remove(); open(true, res); };
+    o.querySelector("#pk-gal").onclick = () => { o.remove(); open(false, res); };
+    o.addEventListener("click", e => { if (e.target === o || e.target.id === "pk-x") { o.remove(); res([]); } });
   });
 }
 function resizeImage(file, max = 1600, quality = 0.82) {
