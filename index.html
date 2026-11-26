@@ -949,6 +949,9 @@ function openTicket(id) {
     try {
       await addDoc(collection(db, "tickets", id, "comments"), { uid: uid(), name: myName(), text, createdAt: serverTimestamp() });
       await updateDoc(doc(db, "tickets", id), { updatedAt: serverTimestamp() });
+      // tell the ticket feed, so everyone else gets the new-notice indicator (Staff Hub list and the phone start page)
+      const code = (S.tickets.find(x => x.id === id) || {}).code || "ticket";
+      postTo("tickets", `💬 ${code}: update from ${myName()} — ${text.length > 80 ? text.slice(0, 77) + "…" : text}`, true).catch(() => {});
     } catch { toast("Couldn't post update"); }
   };
   $("#cattach").onclick = async () => {
@@ -960,6 +963,8 @@ function openTicket(id) {
         await addDoc(collection(db, "tickets", id, "comments"), { uid: uid(), name: myName(), text: "", img: url, createdAt: serverTimestamp() });
       }
       await updateDoc(doc(db, "tickets", id), { updatedAt: serverTimestamp() });
+      const code = (S.tickets.find(x => x.id === id) || {}).code || "ticket";
+      postTo("tickets", `📷 ${code}: photo added by ${myName()}`, true).catch(() => {});
     } catch (e) { photoError(e); }
     const b2 = $("#cattach"); if (b2) { b2.disabled = false; b2.textContent = "📎"; }
   };
