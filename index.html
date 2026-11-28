@@ -416,12 +416,17 @@ function startApp() {
     if (S.view === "chat") renderMessages();
   }, console.error));
 
-  const ready = [false, false];
+  const ready = [false, false], inQ = [new Set(), new Set()]; // which chats each of the two queries currently holds
   [query(collection(db, "conversations"), where("members", "array-contains", me)),
    query(collection(db, "conversations"), where("everyone", "==", true))].forEach((q, i) => {
     S.unsub.push(onSnapshot(q, snap => {
       snap.docChanges().forEach(ch => {
-        if (ch.type === "removed") { delete S.convs[ch.doc.id]; if (S.activeConv === ch.doc.id) { goHome(); } return; }
+        if (ch.type === "removed") {
+          inQ[i].delete(ch.doc.id);
+          if (inQ[1 - i].has(ch.doc.id)) return; // still visible through the other query (e.g. a channel switched to admins-only)
+          delete S.convs[ch.doc.id]; if (S.activeConv === ch.doc.id) { goHome(); } return;
+        }
+        inQ[i].add(ch.doc.id);
         const c = data(ch.doc); S.convs[c.id] = c;
         if (c.archived && S.activeConv === c.id) { goHome(); return; }
         maybeNotify(c, ready[i]);
