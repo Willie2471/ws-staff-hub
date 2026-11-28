@@ -357,6 +357,7 @@ function teardown() {
   S.unsub.forEach(f => f()); S.unsub = [];
   S.msgUnsub && S.msgUnsub(); S.cmtUnsub && S.cmtUnsub();
   S.msgUnsub = S.cmtUnsub = null;
+  (S.tUnsub || []).forEach(f => f()); S.tUnsub = []; S.tMode = null;
   Object.assign(S, { users: {}, convs: {}, tickets: [], view: null, activeConv: null, activeTicket: null, seen: {}, seeded: false });
 }
 
@@ -410,6 +411,7 @@ function startApp() {
   S.unsub.push(onSnapshot(collection(db, "users"), snap => {
     S.users = {}; snap.forEach(d => S.users[d.id] = { id: d.id, ...d.data() });
     if (!S.seeded && isAdmin()) { S.seeded = true; seedDefaults(); }
+    startTickets();
     renderSidebar(); refreshHeader();
     if (S.view === "chat") renderMessages();
   }, console.error));
@@ -435,12 +437,30 @@ function startApp() {
     S.cats = (s.exists() && Array.isArray(s.data().list) && s.data().list.length) ? s.data().list : DEFAULT_CATS;
   }, () => {}));
 
-  S.unsub.push(onSnapshot(query(collection(db, "tickets"), orderBy("createdAt", "desc"), limit(200)), snap => {
-    S.tickets = snap.docs.map(data);
+}
+
+/* Tickets: admins load every ticket; everyone else loads only tickets assigned to them, opened by them, or still unassigned. */
+function startTickets() {
+  if (!S.users[uid()]) return;
+  const mode = isAdmin() ? "admin" : "staff";
+  if (S.tMode === mode) return;
+  S.tMode = mode; (S.tUnsub || []).forEach(f => f()); S.tUnsub = [];
+  const me = uid(), col = collection(db, "tickets");
+  const qs = mode === "admin"
+    ? [query(col, orderBy("createdAt", "desc"), limit(200))]
+    : [query(col, where("assignedTo", "==", me), limit(200)),
+       query(col, where("assignees", "array-contains", me), limit(200)),
+       query(col, where("createdBy", "==", me), limit(200)),
+       query(col, where("assignedTo", "==", ""), limit(200))];
+  const parts = qs.map(() => []);
+  const merge = () => {
+    const m = {}; parts.flat().forEach(t => { m[t.id] = t; });
+    S.tickets = Object.values(m).sort((a, b) => ms(b.createdAt) - ms(a.createdAt));
     renderSidebar();
     if (S.view === "tickets") renderTicketList();
     if (S.view === "ticket") renderTicketHead();
-  }, console.error));
+  };
+  qs.forEach((q, i) => S.tUnsub.push(onSnapshot(q, snap => { parts[i] = snap.docs.map(data); merge(); }, console.error)));
 }
 
 async function seedDefaults() {
@@ -585,7 +605,8 @@ function manageChannelsModal() {
       <div class="f"><label>Name</label><input class="cn" value="${esc(c.name)}" maxlength="30"></div>
       <div class="f"><label>Description</label><input class="cd" value="${esc(c.desc || "")}" maxlength="80"></div>
       ${c.id === "tickets"
-        ? '<div class="meta">The ticket feed can be renamed but not hidden.</div>'
+        ? `<div class="meta">The ticket feed can be renamed but not hidden.</div>
+        <label style="display:flex;gap:8px;align-items:center;margin:8px 0 0"><input type="checkbox" class="ao" ${c.everyone ? "" : "checked"} style="width:auto"> Admins only (hide from staff)</label>`
         : `<label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" class="ch" ${c.archived ? "checked" : ""} style="width:auto"> Hide this channel</label>`}
     </div>`;
   modal("Manage channels", `${chans.map(rowHtml).join("")}
@@ -603,8 +624,12 @@ function manageChannelsModal() {
           const id = row.dataset.id, c = S.convs[id]; if (!c) return;
           const name = clean($(".cn", row).value) || c.name, desc = $(".cd", row).value.trim();
           const archived = id === "tickets" ? false : !!$(".ch", row)?.checked;
-          if (name !== c.name || desc !== (c.desc || "") || archived !== !!c.archived) {
-            b.update(doc(db, "conversations", id), { name, desc, archived }); n++;
+          const ao = id === "tickets" && $(".ao", row) ? $(".ao", row).checked : null;
+          const aoChanged = ao !== null && ao === !!c.everyone;
+          if (name !== c.name || desc !== (c.desc || "") || archived !== !!c.archived || aoChanged) {
+            const patch = { name, desc, archived };
+            if (aoChanged) { patch.everyone = !ao; patch.members = ao ? Object.values(S.users).filter(u => u.role === "admin").map(u => u.id) : []; }
+            b.update(doc(db, "conversations", id), patch); n++;
           }
         });
         const nn = clean($("#ann", o).value);
@@ -848,14 +873,18 @@ function renderTicketList() {
   const tb = $("#tb"); if (!tb || S.view !== "tickets") return;
   const isOpen = t => t.status !== "closed" && t.status !== "resolved";
   const f = S.ticketFilter;
-  const list = S.tickets.filter(t => f === "open" ? isOpen(t) : f === "mine" ? isOpen(t) && ticketOwners(t).includes(uid()) : f === "done" ? !isOpen(t) : true);
+  const pp = isAdmin() ? (S.ticketPerson || "") : "";
+  const list = S.tickets.filter(t => !pp || (pp === "none" ? !ticketOwners(t).length : ticketOwners(t).includes(pp))).filter(t => f === "open" ? isOpen(t) : f === "mine" ? isOpen(t) && ticketOwners(t).includes(uid()) : f === "done" ? !isOpen(t) : true);
   const chip = (k, l) => `<button class="chip ${f === k ? "on" : ""}" data-f="${k}">${l}</button>`;
-  tb.innerHTML = `<div class="chips">${chip("open", "Open")}${chip("mine", "Assigned to me")}${chip("done", "Resolved / closed")}${chip("all", "All")}</div>` +
+  const openFor = id => S.tickets.filter(t => isOpen(t) && ticketOwners(t).includes(id)).length;
+  const who = isAdmin() ? `<select id="tpp" class="chip" aria-label="Show tickets for" style="padding:6px 10px"><option value="">Everyone</option>${Object.values(S.users).map(u => `<option value="${u.id}" ${pp === u.id ? "selected" : ""}>${esc(u.name)} (${openFor(u.id)} open)</option>`).join("")}<option value="none" ${pp === "none" ? "selected" : ""}>Unassigned</option></select>` : "";
+  tb.innerHTML = `<div class="chips">${chip("open", "Open")}${chip("mine", "Assigned to me")}${chip("done", "Resolved / closed")}${chip("all", "All")}${who}</div>` +
     (list.map(t => `<button class="tcard" data-t="${t.id}">
       <div class="top"><span class="code">${esc(t.code)} · ${esc(t.category)}</span><span><span class="pill p-${t.priority}">${PRIORITIES[t.priority] || t.priority}</span> <span class="pill s-${t.status}">${STATUSES[t.status] || t.status}</span></span></div>
       <h3>${esc(t.title)}</h3>
       <div class="meta"><span>${t.source === "email" ? "📥 " : ""}From ${esc(t.createdByName)}</span><span>${ticketOwners(t).length ? "Assigned to " + esc(ownerNames(t)) : "Unassigned"}</span>${t.dueDate ? `<span>Due ${esc(t.dueDate)}</span>` : ""}<span>${ago(ms(t.createdAt))}</span></div>
     </button>`).join("") || `<div class="empty">No tickets here. 🎉</div>`);
+  const sel = $("#tpp", tb); if (sel) sel.onchange = () => { S.ticketPerson = sel.value; renderTicketList(); };
   tb.onclick = e => {
     const c = e.target.closest("[data-f]"), t = e.target.closest("[data-t]");
     if (c) { S.ticketFilter = c.dataset.f; renderTicketList(); }
@@ -911,7 +940,7 @@ function newTicketModal() {
         const ref = await addDoc(collection(db, "tickets"), {
           number: n, code, title, category, priority, status: "open", description: $("#nd", o).value.trim(),
           photos: urls,
-          createdBy: uid(), createdByName: myName(), assignedTo: $("#na", o).value, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+          createdBy: uid(), createdByName: myName(), assignedTo: $("#na", o).value, assignees: $("#na", o).value ? [$("#na", o).value] : [], createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         postTo("tickets", `🎫 ${code} opened by ${myName()}: ${title} (${category} · ${PRIORITIES[priority]})`, true).catch(() => {});
         close(); openTicket(ref.id);
